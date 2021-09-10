@@ -29,18 +29,10 @@ private:
                     0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F
             };
 
-//    BCRYPT_ALG_HANDLE aes_alg{};
-    BCRYPT_KEY_HANDLE key_handle{};
-    PBYTE key_object{};
-    PBYTE bloc_ptr{};
-    PBYTE cipher_text{};
-    PBYTE plain_text{};
-    PBYTE iv_ptr{};
-
 public:
-    virtual ~AesEncode();
+    virtual ~AesEncode() = default;
 
-    std::vector<int> EncodeAes(const std::string &text);
+    static std::vector<int> EncodeAes(const std::string &text);
 
     static void PrintData(const std::vector<int>& data);
 };
