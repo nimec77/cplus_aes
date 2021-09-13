@@ -4,114 +4,92 @@
 
 #include "aes_encode.h"
 
-std::vector<int> AesEncode::EncodeAes(const std::string &text) {
+void AesEncode::InitAes() {
     BCRYPT_ALG_HANDLE aes_alg_;
     auto status = BCryptOpenAlgorithmProvider(&aes_alg_, BCRYPT_AES_ALGORITHM, nullptr, 0);
     if (!NT_SUCCESS(status)) {
         std::cout << "BCryptOpenAlgorithmProvider error: " << status << std::endl;
-        return {};
+        return;
     }
-    auto aes_alg_ptr_ = ptr_helper::MakeAlgorithmUniquePtr(aes_alg_);
-    auto key_object_size_ = 0;
-    DWORD data_size_ = 0;
+    aes_alg_ptr = ptr_helper::MakeAlgorithmSharedPtr(aes_alg_);
+
     status = BCryptGetProperty(
-            aes_alg_ptr_.get(),
+            aes_alg_ptr.get(),
             BCRYPT_OBJECT_LENGTH,
-            (PBYTE) &key_object_size_,
+            (PBYTE) &key_object_size,
             sizeof(DWORD),
-            &data_size_,
+            &data_size,
             0);
     if (!NT_SUCCESS(status)) {
         std::cout << "BCryptGetProperty error: " << status << std::endl;
-        return {};
+        aes_alg_ptr.reset();
+        return;
     }
 
-    auto key_object_ptr_ = ptr_helper::MakeHeapUniquePtr(key_object_size_);
-    if (!key_object_ptr_) {
-        std::cout << "HeapAlloc error key_object" << std::endl;
-        return {};
-    }
-
-    DWORD block_len_ = 0;
     status = BCryptGetProperty(
-            aes_alg_ptr_.get(),
+            aes_alg_ptr.get(),
             BCRYPT_BLOCK_LENGTH,
-            (PBYTE) &block_len_,
+            (PBYTE) &block_len,
             sizeof(DWORD),
-            &data_size_,
+            &data_size,
             0);
     if (!NT_SUCCESS(status)) {
         std::cout << "BCryptGetProperty error: " << status << std::endl;
-        return {};
+        aes_alg_ptr.reset();
+        return;
     }
 
-    if (block_len_ > sizeof(rgb_iv)) {
+    if (block_len > sizeof(rgb_iv)) {
         std::cout << "Block length is longer then the provided IV length" << std::endl;
+        aes_alg_ptr.reset();
+        return;
     }
 
-    auto iv_ptr_ = ptr_helper::MakeHeapUniquePtr(block_len_);
-    if (!iv_ptr_) {
+    iv_ptr = ptr_helper::MakeHeapSharedPtr(block_len);
+    if (!iv_ptr) {
         std::cout << "HeapAlloc error iv_ptr" << std::endl;
-        return {};
+        aes_alg_ptr.reset();
+        return;
     }
 
-    memcpy(iv_ptr_.get(), rgb_iv, block_len_);
+    memcpy(iv_ptr.get(), rgb_iv, block_len);
 
     status = BCryptSetProperty(
-            aes_alg_ptr_.get(),
+            aes_alg_ptr.get(),
             BCRYPT_CHAINING_MODE,
             (PBYTE) BCRYPT_CHAIN_MODE_CBC,
             sizeof(BCRYPT_CHAIN_MODE_CBC),
             0);
     if (!NT_SUCCESS(status)) {
-        std::cout << "BCryptGetProperty error: " << status << std::endl;
+        std::cout << "BCryptSetProperty error: " << status << std::endl;
+        aes_alg_ptr.reset();
+        return;
+    }
+}
+
+std::vector<BYTE> AesEncode::EncodeAes(const std::vector<BYTE>& key_data, const std::string &text) {
+    if (!aes_alg_ptr) {
+        std::cout << "BCRYPT_AES_ALGORITHM not initialized" << std::endl;
+        return {};
+    }
+
+    auto key_object_ptr_ = ptr_helper::MakeHeapUniquePtr(key_object_size);
+    if (!key_object_ptr_) {
+        std::cout << "HeapAlloc error key_object" << std::endl;
         return {};
     }
 
     BCRYPT_KEY_HANDLE key_handle_;
-    status = BCryptGenerateSymmetricKey(
-            aes_alg_ptr_.get(),
+    auto status = BCryptGenerateSymmetricKey(
+            aes_alg_ptr.get(),
             &key_handle_,
             key_object_ptr_.get(),
-            key_object_size_,
-            (PBYTE) rgb_aes128_key,
-            sizeof(rgb_aes128_key),
+            key_object_size,
+            (PBYTE) key_data.data(),
+            key_data.size(),
             0);
     if (!NT_SUCCESS(status)) {
         std::cout << "BCryptGenerateSymmetricKey error: " << status << std::endl;
-        return {};
-    }
-    auto key_handle_ptr_ = ptr_helper::MakeKeyHandleUniquePtr(key_handle_);
-
-    status = BCryptExportKey(
-            key_handle_ptr_.get(),
-            nullptr,
-            BCRYPT_OPAQUE_KEY_BLOB,
-            nullptr,
-            0,
-            &block_len_,
-            0);
-    if (!NT_SUCCESS(status)) {
-        std::cout << "BCryptExportKey error: " << status << std::endl;
-        return {};
-    }
-
-    auto bloc_ptr_ = ptr_helper::MakeHeapUniquePtr(block_len_);
-    if (!bloc_ptr_) {
-        std::cout << "HeapAlloc error bloc" << std::endl;
-        return {};
-    }
-
-    status = BCryptExportKey(
-            key_handle_ptr_.get(),
-            nullptr,
-            BCRYPT_OPAQUE_KEY_BLOB,
-            bloc_ptr_.get(),
-            block_len_,
-            &block_len_,
-            0);
-    if (!NT_SUCCESS(status)) {
-        std::cout << "BCryptExportKey error: " << status << std::endl;
         return {};
     }
 
@@ -125,19 +103,20 @@ std::vector<int> AesEncode::EncodeAes(const std::string &text) {
 
     DWORD cipher_text_size_ = 0;
 
+    auto key_handle_ptr_ = ptr_helper::MakeKeyHandleUniquePtr(key_handle_);
     status = BCryptEncrypt(
             key_handle_ptr_.get(),
             plain_text_ptr_.get(),
             plain_text_size_,
             nullptr,
-            iv_ptr_.get(),
-            block_len_,
+            iv_ptr.get(),
+            block_len,
             nullptr,
             0,
             &cipher_text_size_,
             BCRYPT_BLOCK_PADDING);
     if (!NT_SUCCESS(status)) {
-        std::cout << "BCryptEncrypt error: " << status << std::endl;
+        std::cout << "BCryptEncrypt error: " << std::hex << status << std::endl;
         return {};
     }
 
@@ -152,11 +131,11 @@ std::vector<int> AesEncode::EncodeAes(const std::string &text) {
             plain_text_ptr_.get(),
             plain_text_size_,
             nullptr,
-            iv_ptr_.get(),
-            block_len_,
+            iv_ptr.get(),
+            block_len,
             cipher_text_ptr_.get(),
             cipher_text_size_,
-            &data_size_,
+            &data_size,
             BCRYPT_BLOCK_PADDING);
     if (!NT_SUCCESS(status)) {
         std::cout << "BCryptEncrypt error: " << status << std::endl;
@@ -166,10 +145,11 @@ std::vector<int> AesEncode::EncodeAes(const std::string &text) {
     return {cipher_text_ptr_.get(), cipher_text_ptr_.get() + cipher_text_size_};
 }
 
-void AesEncode::PrintData(const std::vector<int> &data) {
-    for (auto iter : data) {
-        std::cout << std::hex << std::setfill('0') << std::setw(2) << iter << " ";
+void AesEncode::PrintData(const std::vector<BYTE> &data) {
+    for (int item : data) {
+        std::cout << std::hex << std::setfill('0') << std::setw(2) << item;
     }
     std::cout << std::endl;
 }
+
 
