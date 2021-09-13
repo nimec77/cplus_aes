@@ -1,22 +1,18 @@
-#include <iostream>
 #include "aes_encode.h"
-
-constexpr static const BYTE rgb_aes128_key[] =
-        {
-                0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
-                0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F
-        };
 
 int main() {
     std::cout << "Windows AES encode starting!" << std::endl;
 
-    auto aes_encode = AesEncode();
+    const auto key_ = AesEncode::StringToBytes("123456");
+    AesEncode::PrintData(key_);
+    auto aes_encode_ = AesEncode();
 
-    aes_encode.InitAes();
-    const auto key = std::vector<BYTE>(rgb_aes128_key, rgb_aes128_key + sizeof(rgb_aes128_key));
-    AesEncode::PrintData(key);
+    const auto md5_hash_ = AesEncode::Md5Hash(key_);
+    AesEncode::PrintData(md5_hash_);
 
-    const auto encoded = aes_encode.EncodeAes(key, "Test_data");
+    aes_encode_.InitAes();
+
+    const auto encoded = aes_encode_.EncodeAes(md5_hash_, "Test data");
     AesEncode::PrintData(encoded);
 
     std::cout << "Windows AES encode end!" << std::endl;

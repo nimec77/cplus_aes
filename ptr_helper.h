@@ -8,8 +8,12 @@
 #include <iostream>
 #include <windows.h>
 #include <bcrypt.h>
+#include <vector>
 
 namespace ptr_helper {
+
+    using Bytes = std::vector<BYTE>;
+
     struct CloseAlgorithm {
         void operator()(BCRYPT_ALG_HANDLE alg_handle) const {
             if (alg_handle) {

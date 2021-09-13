@@ -8,8 +8,9 @@
 #include <iostream>
 #include <windows.h>
 #include <bcrypt.h>
-#include <vector>
 #include <iomanip>
+#include <sstream>
+#include <string>
 #include "ptr_helper.h"
 
 #define NT_SUCCESS(status)  (((NTSTATUS)(status)) >= 0)
@@ -30,13 +31,23 @@ private:
     ptr_helper::HeapSharedPtr iv_ptr;
 
 public:
+    using Bytes = ptr_helper::Bytes;
+
     virtual ~AesEncode() = default;
+
+    static std::string BytesToString(const Bytes &data);
+
+    static Bytes HexStringToBytes(const std::string& value);
+
+    static Bytes StringToBytes(const std::string& value);
+
+    static Bytes Md5Hash(const Bytes& value);
 
     void InitAes();
 
-    std::vector<BYTE> EncodeAes(const std::vector<BYTE> &key_data, const std::string &text);
+    Bytes EncodeAes(const Bytes &key_data, const std::string &text);
 
-    static void PrintData(const std::vector<BYTE> &data);
+    static void PrintData(const Bytes &data);
 
 };
 

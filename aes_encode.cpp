@@ -4,37 +4,143 @@
 
 #include "aes_encode.h"
 
+using Bytes = ptr_helper::Bytes;
+
+std::string AesEncode::BytesToString(const Bytes &data) {
+    std::stringstream stream_;
+
+    for (int item : data) {
+        stream_ << std::hex << std::setfill('0') << std::setw(2) << std::uppercase << item;
+    }
+
+    return std::string(stream_.str());
+}
+
+Bytes AesEncode::HexStringToBytes(const std::string &value) {
+    Bytes result{};
+
+    for (auto i = 0; i < value.length(); i += 2) {
+        const auto item = value.substr(i, 2);
+        result.push_back(std::stoul(item, nullptr, 16));
+    }
+
+    return result;
+}
+
+Bytes AesEncode::StringToBytes(const std::string &value) {
+    return AesEncode::Bytes{value.begin(), value.end()};
+}
+
+Bytes AesEncode::Md5Hash(const Bytes &value) {
+    BCRYPT_ALG_HANDLE md5_alg_;
+    auto status_ = BCryptOpenAlgorithmProvider(&md5_alg_, BCRYPT_MD5_ALGORITHM, nullptr, 0);
+    if (!NT_SUCCESS(status_)) {
+        std::cout << "BCryptOpenAlgorithmProvider error: " << status_ << std::endl;
+        return {};
+    }
+    auto md5_alg_ptr_ = ptr_helper::MakeAlgorithmSharedPtr(md5_alg_);
+
+    DWORD hash_object_size_ = 0;
+    DWORD data_size_ = 0;
+
+    status_ = BCryptGetProperty(
+            md5_alg_ptr_.get(),
+            BCRYPT_OBJECT_LENGTH,
+            (PBYTE) &hash_object_size_,
+            sizeof(DWORD),
+            &data_size_,
+            0);
+    if (!NT_SUCCESS(status_)) {
+        std::cout << "BCryptGetProperty error: " << std::hex << status_ << std::endl;
+        return {};
+    }
+
+    auto hash_object_ptr_ = ptr_helper::MakeHeapUniquePtr(hash_object_size_);
+
+    DWORD hash_size_ = 0;
+    status_ = BCryptGetProperty(
+            md5_alg_ptr_.get(),
+            BCRYPT_HASH_LENGTH,
+            (PBYTE) &hash_size_,
+            sizeof(DWORD),
+            &data_size_,
+            0);
+    if (!NT_SUCCESS(status_)) {
+        std::cout << "BCryptGetProperty error: " << std::hex << status_ << std::endl;
+        return {};
+    }
+
+    auto hash_ptr_ = ptr_helper::MakeHeapUniquePtr(hash_size_);
+
+    BCRYPT_HASH_HANDLE hash_handle_;
+    status_ = BCryptCreateHash(
+            md5_alg_ptr_.get(),
+            &hash_handle_,
+            hash_object_ptr_.get(),
+            hash_object_size_,
+            nullptr,
+            0,
+            0);
+    if (!NT_SUCCESS(status_)) {
+        std::cout << "BCryptCreateHash error: " << std::hex << status_ << std::endl;
+        return {};
+    }
+
+    auto hash_handle_ptr_ = ptr_helper::MakeKeyHandleUniquePtr(hash_handle_);
+    status_ = BCryptHashData(
+            hash_handle_ptr_.get(),
+            (PBYTE) value.data(),
+            value.size(),
+            0);
+    if (!NT_SUCCESS(status_)) {
+        std::cout << "BCryptHashData error: " << std::hex << status_ << std::endl;
+        return {};
+    }
+
+    status_ = BCryptFinishHash(
+            hash_handle_ptr_.get(),
+            hash_ptr_.get(),
+            hash_size_,
+            0);
+    if (!NT_SUCCESS(status_)) {
+        std::cout << "BCryptFinishHash error: " << std::hex << status_ << std::endl;
+        return {};
+    }
+
+    return {hash_ptr_.get(), hash_ptr_.get() + hash_size_};
+}
+
 void AesEncode::InitAes() {
     BCRYPT_ALG_HANDLE aes_alg_;
-    auto status = BCryptOpenAlgorithmProvider(&aes_alg_, BCRYPT_AES_ALGORITHM, nullptr, 0);
-    if (!NT_SUCCESS(status)) {
-        std::cout << "BCryptOpenAlgorithmProvider error: " << status << std::endl;
+    auto status_ = BCryptOpenAlgorithmProvider(&aes_alg_, BCRYPT_AES_ALGORITHM, nullptr, 0);
+    if (!NT_SUCCESS(status_)) {
+        std::cout << "BCryptOpenAlgorithmProvider error: " << std::hex << status_ << std::endl;
         return;
     }
     aes_alg_ptr = ptr_helper::MakeAlgorithmSharedPtr(aes_alg_);
 
-    status = BCryptGetProperty(
+    status_ = BCryptGetProperty(
             aes_alg_ptr.get(),
             BCRYPT_OBJECT_LENGTH,
             (PBYTE) &key_object_size,
             sizeof(DWORD),
             &data_size,
             0);
-    if (!NT_SUCCESS(status)) {
-        std::cout << "BCryptGetProperty error: " << status << std::endl;
+    if (!NT_SUCCESS(status_)) {
+        std::cout << "BCryptGetProperty error: " << std::hex << status_ << std::endl;
         aes_alg_ptr.reset();
         return;
     }
 
-    status = BCryptGetProperty(
+    status_ = BCryptGetProperty(
             aes_alg_ptr.get(),
             BCRYPT_BLOCK_LENGTH,
             (PBYTE) &block_len,
             sizeof(DWORD),
             &data_size,
             0);
-    if (!NT_SUCCESS(status)) {
-        std::cout << "BCryptGetProperty error: " << status << std::endl;
+    if (!NT_SUCCESS(status_)) {
+        std::cout << "BCryptGetProperty error: " << std::hex << status_ << std::endl;
         aes_alg_ptr.reset();
         return;
     }
@@ -54,20 +160,20 @@ void AesEncode::InitAes() {
 
     memcpy(iv_ptr.get(), rgb_iv, block_len);
 
-    status = BCryptSetProperty(
+    status_ = BCryptSetProperty(
             aes_alg_ptr.get(),
             BCRYPT_CHAINING_MODE,
             (PBYTE) BCRYPT_CHAIN_MODE_CBC,
             sizeof(BCRYPT_CHAIN_MODE_CBC),
             0);
-    if (!NT_SUCCESS(status)) {
-        std::cout << "BCryptSetProperty error: " << status << std::endl;
+    if (!NT_SUCCESS(status_)) {
+        std::cout << "BCryptSetProperty error: " << std::hex << status_ << std::endl;
         aes_alg_ptr.reset();
         return;
     }
 }
 
-std::vector<BYTE> AesEncode::EncodeAes(const std::vector<BYTE>& key_data, const std::string &text) {
+Bytes AesEncode::EncodeAes(const Bytes &key_data, const std::string &text) {
     if (!aes_alg_ptr) {
         std::cout << "BCRYPT_AES_ALGORITHM not initialized" << std::endl;
         return {};
@@ -80,7 +186,7 @@ std::vector<BYTE> AesEncode::EncodeAes(const std::vector<BYTE>& key_data, const 
     }
 
     BCRYPT_KEY_HANDLE key_handle_;
-    auto status = BCryptGenerateSymmetricKey(
+    auto status_ = BCryptGenerateSymmetricKey(
             aes_alg_ptr.get(),
             &key_handle_,
             key_object_ptr_.get(),
@@ -88,8 +194,8 @@ std::vector<BYTE> AesEncode::EncodeAes(const std::vector<BYTE>& key_data, const 
             (PBYTE) key_data.data(),
             key_data.size(),
             0);
-    if (!NT_SUCCESS(status)) {
-        std::cout << "BCryptGenerateSymmetricKey error: " << status << std::endl;
+    if (!NT_SUCCESS(status_)) {
+        std::cout << "BCryptGenerateSymmetricKey error: " << std::hex << status_ << std::endl;
         return {};
     }
 
@@ -104,7 +210,7 @@ std::vector<BYTE> AesEncode::EncodeAes(const std::vector<BYTE>& key_data, const 
     DWORD cipher_text_size_ = 0;
 
     auto key_handle_ptr_ = ptr_helper::MakeKeyHandleUniquePtr(key_handle_);
-    status = BCryptEncrypt(
+    status_ = BCryptEncrypt(
             key_handle_ptr_.get(),
             plain_text_ptr_.get(),
             plain_text_size_,
@@ -115,8 +221,8 @@ std::vector<BYTE> AesEncode::EncodeAes(const std::vector<BYTE>& key_data, const 
             0,
             &cipher_text_size_,
             BCRYPT_BLOCK_PADDING);
-    if (!NT_SUCCESS(status)) {
-        std::cout << "BCryptEncrypt error: " << std::hex << status << std::endl;
+    if (!NT_SUCCESS(status_)) {
+        std::cout << "BCryptEncrypt error: " << std::hex << status_ << std::endl;
         return {};
     }
 
@@ -126,7 +232,7 @@ std::vector<BYTE> AesEncode::EncodeAes(const std::vector<BYTE>& key_data, const 
         return {};
     }
 
-    status = BCryptEncrypt(
+    status_ = BCryptEncrypt(
             key_handle_ptr_.get(),
             plain_text_ptr_.get(),
             plain_text_size_,
@@ -137,19 +243,18 @@ std::vector<BYTE> AesEncode::EncodeAes(const std::vector<BYTE>& key_data, const 
             cipher_text_size_,
             &data_size,
             BCRYPT_BLOCK_PADDING);
-    if (!NT_SUCCESS(status)) {
-        std::cout << "BCryptEncrypt error: " << status << std::endl;
+    if (!NT_SUCCESS(status_)) {
+        std::cout << "BCryptEncrypt error: " << std::hex << status_ << std::endl;
         return {};
     }
 
     return {cipher_text_ptr_.get(), cipher_text_ptr_.get() + cipher_text_size_};
 }
 
-void AesEncode::PrintData(const std::vector<BYTE> &data) {
+void AesEncode::PrintData(const Bytes &data) {
     for (int item : data) {
-        std::cout << std::hex << std::setfill('0') << std::setw(2) << item;
+        std::cout << std::hex << std::setfill('0') << std::setw(2) << std::uppercase << item;
     }
     std::cout << std::endl;
 }
-
 
