@@ -6,7 +6,7 @@
 
 using Bytes = ptr_helper::Bytes;
 
-std::string AesEncode::BytesToString(const Bytes &data) {
+std::string AesEncode::BytesToHexString(const Bytes &data) {
     std::stringstream stream_;
 
     for (int item : data) {
@@ -30,6 +30,12 @@ Bytes AesEncode::HexStringToBytes(const std::string &value) {
 Bytes AesEncode::StringToBytes(const std::string &value) {
     return AesEncode::Bytes{value.begin(), value.end()};
 }
+
+std::string AesEncode::BytesToString(const Bytes &data) {
+
+    return {data.begin(), data.end()};
+}
+
 
 Bytes AesEncode::Md5Hash(const Bytes &value) {
     BCRYPT_ALG_HANDLE md5_alg_;
@@ -119,12 +125,13 @@ void AesEncode::InitAes() {
     }
     aes_alg_ptr = ptr_helper::MakeAlgorithmSharedPtr(aes_alg_);
 
+    DWORD data_size_ = 0;
     status_ = BCryptGetProperty(
             aes_alg_ptr.get(),
             BCRYPT_OBJECT_LENGTH,
             (PBYTE) &key_object_size,
             sizeof(DWORD),
-            &data_size,
+            &data_size_,
             0);
     if (!NT_SUCCESS(status_)) {
         std::cout << "BCryptGetProperty error: " << std::hex << status_ << std::endl;
@@ -137,7 +144,7 @@ void AesEncode::InitAes() {
             BCRYPT_BLOCK_LENGTH,
             (PBYTE) &block_len,
             sizeof(DWORD),
-            &data_size,
+            &data_size_,
             0);
     if (!NT_SUCCESS(status_)) {
         std::cout << "BCryptGetProperty error: " << std::hex << status_ << std::endl;
@@ -150,15 +157,6 @@ void AesEncode::InitAes() {
         aes_alg_ptr.reset();
         return;
     }
-
-    iv_ptr = ptr_helper::MakeHeapSharedPtr(block_len);
-    if (!iv_ptr) {
-        std::cout << "HeapAlloc error iv_ptr" << std::endl;
-        aes_alg_ptr.reset();
-        return;
-    }
-
-    memcpy(iv_ptr.get(), rgb_iv, block_len);
 
     status_ = BCryptSetProperty(
             aes_alg_ptr.get(),
@@ -210,12 +208,22 @@ Bytes AesEncode::EncodeAes(const Bytes &key_data, const std::string &text) {
     DWORD cipher_text_size_ = 0;
 
     auto key_handle_ptr_ = ptr_helper::MakeKeyHandleUniquePtr(key_handle_);
+
+    auto iv_ptr_ = ptr_helper::MakeHeapSharedPtr(block_len);
+    if (!iv_ptr_) {
+        std::cout << "HeapAlloc error iv_ptr" << std::endl;
+        aes_alg_ptr.reset();
+        return {};
+    }
+
+    memcpy(iv_ptr_.get(), rgb_iv, block_len);
+
     status_ = BCryptEncrypt(
             key_handle_ptr_.get(),
             plain_text_ptr_.get(),
             plain_text_size_,
             nullptr,
-            iv_ptr.get(),
+            iv_ptr_.get(),
             block_len,
             nullptr,
             0,
@@ -232,16 +240,17 @@ Bytes AesEncode::EncodeAes(const Bytes &key_data, const std::string &text) {
         return {};
     }
 
+    DWORD data_size_ = 0;
     status_ = BCryptEncrypt(
             key_handle_ptr_.get(),
             plain_text_ptr_.get(),
             plain_text_size_,
             nullptr,
-            iv_ptr.get(),
+            iv_ptr_.get(),
             block_len,
             cipher_text_ptr_.get(),
             cipher_text_size_,
-            &data_size,
+            &data_size_,
             BCRYPT_BLOCK_PADDING);
     if (!NT_SUCCESS(status_)) {
         std::cout << "BCryptEncrypt error: " << std::hex << status_ << std::endl;
@@ -256,5 +265,84 @@ void AesEncode::PrintData(const Bytes &data) {
         std::cout << std::hex << std::setfill('0') << std::setw(2) << std::uppercase << item;
     }
     std::cout << std::endl;
+}
+
+Bytes AesEncode::DecodeAes(const Bytes &key_data, const Bytes &data) {
+    if (!aes_alg_ptr) {
+        std::cout << "BCRYPT_AES_ALGORITHM not initialized" << std::endl;
+        return {};
+    }
+
+    auto key_object_ptr_ = ptr_helper::MakeHeapUniquePtr(key_object_size);
+    if (!key_object_ptr_) {
+        std::cout << "HeapAlloc error key_object" << std::endl;
+        return {};
+    }
+
+    BCRYPT_KEY_HANDLE key_handle_;
+    auto status_ = BCryptGenerateSymmetricKey(
+            aes_alg_ptr.get(),
+            &key_handle_,
+            key_object_ptr_.get(),
+            key_object_size,
+            (PBYTE) key_data.data(),
+            key_data.size(),
+            0);
+    if (!NT_SUCCESS(status_)) {
+        std::cout << "BCryptGenerateSymmetricKey error: " << std::hex << status_ << std::endl;
+        return {};
+    }
+    auto key_handle_ptr_ = ptr_helper::MakeKeyHandleUniquePtr(key_handle_);
+
+    auto iv_ptr_ = ptr_helper::MakeHeapSharedPtr(block_len);
+    if (!iv_ptr_) {
+        std::cout << "HeapAlloc error iv_ptr" << std::endl;
+        aes_alg_ptr.reset();
+        return {};
+    }
+
+    memcpy(iv_ptr_.get(), rgb_iv, block_len);
+
+    DWORD data_size_ = 0;
+    status_ = BCryptDecrypt(
+            key_handle_ptr_.get(),
+            (PBYTE) data.data(),
+            data.size(),
+            nullptr,
+            iv_ptr_.get(),
+            block_len,
+            nullptr,
+            0,
+            &data_size_,
+            BCRYPT_BLOCK_PADDING);
+    if (!NT_SUCCESS(status_)) {
+        std::cout << "BCryptDecrypt error: " << std::hex << status_ << std::endl;
+        return {};
+    }
+
+    auto plain_text_ptr_ = ptr_helper::MakeHeapUniquePtr(data_size_);
+    if (!plain_text_ptr_) {
+        std::cout << "HeapAlloc error plain_text_ptr_" << std::endl;
+        aes_alg_ptr.reset();
+        return {};
+    }
+
+    status_ = BCryptDecrypt(
+            key_handle_ptr_.get(),
+            (PBYTE) data.data(),
+            data.size(),
+            nullptr,
+            iv_ptr_.get(),
+            block_len,
+            plain_text_ptr_.get(),
+            data_size_,
+            &data_size_,
+            BCRYPT_BLOCK_PADDING);
+    if (!NT_SUCCESS(status_)) {
+        std::cout << "BCryptDecrypt error: " << std::hex << status_ << std::endl;
+        return {};
+    }
+
+    return {plain_text_ptr_.get(), plain_text_ptr_.get() + data_size_};
 }
 

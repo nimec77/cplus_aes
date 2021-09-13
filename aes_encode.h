@@ -27,25 +27,27 @@ private:
     ptr_helper::SharedPtr aes_alg_ptr;
     DWORD key_object_size;
     DWORD block_len;
-    DWORD data_size;
-    ptr_helper::HeapSharedPtr iv_ptr;
 
 public:
     using Bytes = ptr_helper::Bytes;
 
     virtual ~AesEncode() = default;
 
-    static std::string BytesToString(const Bytes &data);
+    static std::string BytesToHexString(const Bytes &data);
 
     static Bytes HexStringToBytes(const std::string& value);
 
     static Bytes StringToBytes(const std::string& value);
+
+    static std::string BytesToString(const Bytes &data);
 
     static Bytes Md5Hash(const Bytes& value);
 
     void InitAes();
 
     Bytes EncodeAes(const Bytes &key_data, const std::string &text);
+
+    Bytes DecodeAes(const Bytes &key_data, const Bytes &data);
 
     static void PrintData(const Bytes &data);
 
